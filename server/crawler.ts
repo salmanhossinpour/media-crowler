@@ -300,6 +300,169 @@ export async function getRadioJavanPlaylistDetail(playlistId: string) {
   }
 }
 
+// In-memory cache for latest songs & playlists
+let rjLatestSongsCache: { data: RJSong[]; timestamp: number } | null = null;
+let rjLatestPlaylistsCache: { data: any[]; timestamp: number } | null = null;
+const CACHE_TTL = 8 * 60 * 1000; // 8 minutes
+
+export async function getRadioJavanLatestSongs(limit = 40) {
+  try {
+    if (rjLatestSongsCache && (Date.now() - rjLatestSongsCache.timestamp < CACHE_TTL)) {
+      return {
+        success: true,
+        source: 'Radio Javan (play.radiojavan.com)',
+        count: Math.min(limit, rjLatestSongsCache.data.length),
+        songs: rjLatestSongsCache.data.slice(0, limit)
+      };
+    }
+
+    const pagesToFetch = ['https://play.radiojavan.com/browse', 'https://play.radiojavan.com/'];
+    const songs: RJSong[] = [];
+    const seenIds = new Set<string | number>();
+
+    for (const pageUrl of pagesToFetch) {
+      try {
+        const res = await fetch(pageUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          },
+          signal: AbortSignal.timeout(8000)
+        });
+        if (!res.ok) continue;
+        const html = await res.text();
+        const chunks = html.split('self.__next_f.push(');
+
+        for (const chunk of chunks) {
+          if (!chunk.includes('media/mp3/')) continue;
+          try {
+            const closingIdx = chunk.lastIndexOf(')');
+            if (closingIdx === -1) continue;
+            const parsed = JSON.parse(chunk.slice(0, closingIdx));
+            const strData = parsed[1];
+            if (typeof strData !== 'string') continue;
+
+            const matches = [...strData.matchAll(/\{"id":(\d+),"title":/g)];
+            for (const sm of matches) {
+              const start = sm.index!;
+              let depth = 0;
+              let end = -1;
+              for (let i = start; i < strData.length; i++) {
+                if (strData[i] === '{') depth++;
+                else if (strData[i] === '}') {
+                  depth--;
+                  if (depth === 0) { end = i + 1; break; }
+                }
+              }
+              if (end !== -1) {
+                try {
+                  const rawItem = JSON.parse(strData.slice(start, end));
+                  if (rawItem.id && !seenIds.has(rawItem.id)) {
+                    seenIds.add(rawItem.id);
+                    songs.push(formatRJSong(rawItem));
+                  }
+                } catch {}
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+
+    // If fetch failed or yielded 0 songs, fall back to existing cache or search
+    if (songs.length === 0) {
+      if (rjLatestSongsCache?.data.length) {
+        return {
+          success: true,
+          source: 'Radio Javan (play.radiojavan.com) [cache]',
+          count: Math.min(limit, rjLatestSongsCache.data.length),
+          songs: rjLatestSongsCache.data.slice(0, limit)
+        };
+      }
+      const fallbackSearch = await searchRadioJavan('Shadmehr Aghili');
+      const fallbackResults: any = fallbackSearch.results;
+      if (fallbackSearch.success && fallbackResults && Array.isArray(fallbackResults.songs)) {
+        return {
+          success: true,
+          source: 'Radio Javan',
+          count: Math.min(limit, fallbackResults.songs.length),
+          songs: fallbackResults.songs.slice(0, limit)
+        };
+      }
+    }
+
+    rjLatestSongsCache = { data: songs, timestamp: Date.now() };
+
+    return {
+      success: true,
+      source: 'Radio Javan (play.radiojavan.com)',
+      count: Math.min(limit, songs.length),
+      songs: songs.slice(0, limit)
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function getRadioJavanLatestPlaylists(limit = 30) {
+  try {
+    if (rjLatestPlaylistsCache && (Date.now() - rjLatestPlaylistsCache.timestamp < CACHE_TTL)) {
+      return {
+        success: true,
+        source: 'Radio Javan (play.radiojavan.com)',
+        count: Math.min(limit, rjLatestPlaylistsCache.data.length),
+        playlists: rjLatestPlaylistsCache.data.slice(0, limit)
+      };
+    }
+
+    const url = `${RJ_BASE}/playlists_dash`;
+    const res = await fetch(url, { headers: RJ_HEADERS, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`RJ Playlists Dash HTTP ${res.status}`);
+    const data = await res.json();
+
+    const allPlaylists: any[] = [];
+    const seenIds = new Set<string>();
+
+    const addPlaylist = (p: any, catName: string, isFeatured = false) => {
+      if (!p || !p.id || seenIds.has(p.id)) return;
+      seenIds.add(p.id);
+      allPlaylists.push({
+        id: p.id,
+        title: p.title,
+        photo: p.photo,
+        followers: p.followers || 0,
+        items_count: p.items_count || p.count || 0,
+        share_link: p.share_link,
+        updated_at: p.last_updated_at || p.updated_at,
+        category: catName,
+        is_featured: isFeatured
+      });
+    };
+
+    // Add featured playlists
+    (data.mp3s?.featured || []).forEach((p: any) => addPlaylist(p, 'Featured', true));
+
+    // Add playlists from all categories
+    (data.mp3s?.categories || []).forEach((cat: any) => {
+      (cat.playlists || []).forEach((p: any) => addPlaylist(p, cat.name, false));
+    });
+
+    // Sort by updated_at descending (newest updated playlists first)
+    allPlaylists.sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
+
+    rjLatestPlaylistsCache = { data: allPlaylists, timestamp: Date.now() };
+
+    return {
+      success: true,
+      source: 'Radio Javan (play.radiojavan.com)',
+      count: Math.min(limit, allPlaylists.length),
+      playlists: allPlaylists.slice(0, limit)
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
 function formatRJSong(item: any): RJSong {
   const baseLink = item.link || '';
   // Generate 320k, 256k, 128k variations
@@ -357,6 +520,8 @@ export interface MovieItem {
   cover?: string;
   genres?: string[];
   country?: string[];
+  source_name?: 'Darknama' | 'Cenamaflix' | string;
+  post_url?: string;
   sources?: {
     id?: number;
     quality: string;
@@ -366,6 +531,10 @@ export interface MovieItem {
   }[];
   subtitles?: {
     language: string;
+    url: string;
+  }[];
+  online_streams?: {
+    type: string;
     url: string;
   }[];
 }
@@ -461,6 +630,7 @@ function formatDarknamaItem(p: any): MovieItem {
     cover: p.cover,
     genres: (p.genres || []).map((g: any) => (typeof g === 'string' ? g : g.title)),
     country: (p.country || []).map((c: any) => (typeof c === 'string' ? c : c.title)),
+    source_name: 'Darknama',
     sources: (p.sources || []).map((s: any) => ({
       id: s.id,
       quality: s.quality || 'Direct Link',
@@ -475,12 +645,28 @@ function formatDarknamaItem(p: any): MovieItem {
   };
 }
 
+// Simple in-memory cache for Cenamaflix requests
+const cenamaflixMemoryCache = new Map<string, { data: any; expiry: number }>();
+function getCenamaflixCache(key: string) {
+  const cached = cenamaflixMemoryCache.get(key);
+  if (cached && cached.expiry > Date.now()) return cached.data;
+  if (cached) cenamaflixMemoryCache.delete(key);
+  return null;
+}
+function setCenamaflixCache(key: string, data: any, ttlSeconds = 600) {
+  cenamaflixMemoryCache.set(key, { data, expiry: Date.now() + ttlSeconds * 1000 });
+}
+
 // ==========================================
 // 3. CENAMAFLIX CRAWLER (cenamaflix.ir)
 // ==========================================
 
-export async function searchCenamaflix(query: string) {
+export async function searchCenamaflix(query: string, fetchFullDetails: boolean = true) {
   if (!query || !query.trim()) return { success: false, error: 'Query is required', results: [] };
+  const cacheKey = `search:${query.trim().toLowerCase()}:${fetchFullDetails}`;
+  const cached = getCenamaflixCache(cacheKey);
+  if (cached) return cached;
+
   try {
     const url = `https://cenamaflix.ir/?s=${encodeURIComponent(query.trim())}`;
     const res = await fetch(url, { headers: CENAMAFLIX_HEADERS, signal: AbortSignal.timeout(12000) });
@@ -488,62 +674,142 @@ export async function searchCenamaflix(query: string) {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    const items: any[] = [];
+    const postUrls: { url: string; fallbackTitle?: string; fallbackImg?: string }[] = [];
     const seenUrls = new Set<string>();
+    const IGNORED = ['/category/', '/tag/', '/page/', '/daste-bandi', '/movie-sugestor', '/cart', '/checkout', '/my-account', '/contact', '/about', '/rules', '/feed'];
 
-    $('article, .main-articles article, .item, .post-item').each((_, el) => {
-      const linkEl = $(el).find('a').first();
+    $('article, .main-articles article, .item, .post-item, a').each((_, el) => {
+      const linkEl = el.tagName === 'a' ? $(el) : $(el).find('a').first();
       const href = linkEl.attr('href') || $(el).attr('href');
       if (!href || seenUrls.has(href)) return;
-      if (href.includes('/category/') || href.includes('/tag/') || href.includes('/page/')) return;
+      if (!href.startsWith('https://cenamaflix.ir/') || href === 'https://cenamaflix.ir/') return;
+      if (IGNORED.some(ig => href.includes(ig))) return;
 
-      const title = $(el).find('.title, h2, h3, a').text().trim();
-      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
-      const imdb = $(el).find('.imdb, .score, .rating, span:contains("IMDb")').text().replace(/[^0-9.]/g, '').trim();
-      const desc = $(el).find('.desc, .story, p').text().trim();
+      const title = $(el).find('.title, h2, h3, a').text().trim() || linkEl.text().trim() || linkEl.attr('title');
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || linkEl.find('img').attr('src');
 
-      if (title && href) {
-        seenUrls.add(href);
-        items.push({
-          title,
-          url: href,
-          image: img,
-          imdb: imdb || undefined,
-          snippet: desc ? desc.slice(0, 200) : undefined,
-          source: 'Cenamaflix (cenamaflix.ir)'
-        });
-      }
+      seenUrls.add(href);
+      postUrls.push({ url: href, fallbackTitle: title, fallbackImg: img });
     });
 
-    // If container selectors were not found, fallback to anchor scan
-    if (items.length === 0) {
-      $('a').each((_, el) => {
-        const href = $(el).attr('href');
-        if (!href || seenUrls.has(href)) return;
-        if (!href.startsWith('https://cenamaflix.ir/')) return;
-        if (href.includes('/category/') || href.includes('/tag/') || href.includes('/page/') || href === 'https://cenamaflix.ir/') return;
+    // If fetchFullDetails is true (Default - provides full parity with Darknama: direct links & qualities in 1 go!)
+    if (fetchFullDetails) {
+      const targetUrls = postUrls.slice(0, 12);
+      const postPromises = targetUrls.map(async (item) => {
+        try {
+          const detail = await getCenamaflixPostDetail(item.url);
+          if (detail.success && detail.movie) {
+            return detail.movie;
+          }
+        } catch {
+          // ignore individual post error
+        }
+        return null;
+      });
 
-        const title = $(el).text().trim() || $(el).attr('title');
-        const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
-        if (title && title.length > 3 && !title.includes('اشتراک') && !title.includes('خانه')) {
-          seenUrls.add(href);
-          items.push({
-            title,
-            url: href,
-            image: img,
-            source: 'Cenamaflix (cenamaflix.ir)'
-          });
+      const settled = await Promise.allSettled(postPromises);
+      const movies: MovieItem[] = [];
+      settled.forEach((s) => {
+        if (s.status === 'fulfilled' && s.value) {
+          movies.push(s.value);
         }
       });
+
+      const result = {
+        success: true,
+        source: 'Cenamaflix (cenamaflix.ir)',
+        query,
+        count: movies.length,
+        results: movies
+      };
+      setCenamaflixCache(cacheKey, result, 300);
+      return result;
     }
 
-    return {
+    // Fallback lightweight list
+    const items = postUrls.slice(0, 15).map(item => ({
+      title: item.fallbackTitle || 'Cenamaflix Item',
+      url: item.url,
+      image: item.fallbackImg,
+      source: 'Cenamaflix (cenamaflix.ir)'
+    }));
+
+    const result = {
       success: true,
       source: 'Cenamaflix (cenamaflix.ir)',
       query,
       count: items.length,
       results: items
     };
+    setCenamaflixCache(cacheKey, result, 300);
+    return result;
+  } catch (error: any) {
+    return { success: false, error: error.message, results: [] };
+  }
+}
+
+export async function getCenamaflixLatest(type: 'all' | 'movie' | 'serie' = 'all', count: number = 16) {
+  const cacheKey = `latest:${type}:${count}`;
+  const cached = getCenamaflixCache(cacheKey);
+  if (cached) return cached;
+
+  try {
+    let targetUrl = 'https://cenamaflix.ir/';
+    if (type === 'serie') {
+      targetUrl = 'https://cenamaflix.ir/category/serial/';
+    } else if (type === 'movie') {
+      targetUrl = 'https://cenamaflix.ir/category/cinematic/';
+    }
+
+    const res = await fetch(targetUrl, { headers: CENAMAFLIX_HEADERS, signal: AbortSignal.timeout(12000) });
+    if (!res.ok) throw new Error(`Cenamaflix Latest HTTP ${res.status}`);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const postUrls: string[] = [];
+    const seenUrls = new Set<string>();
+    const IGNORED = ['/category/', '/tag/', '/page/', '/daste-bandi', '/movie-sugestor', '/cart', '/checkout', '/my-account', '/feed', '/wp-json'];
+
+    $('a').each((_, el) => {
+      const href = $(el).attr('href');
+      if (!href || seenUrls.has(href)) return;
+      if (!href.startsWith('https://cenamaflix.ir/') || href === 'https://cenamaflix.ir/') return;
+      if (IGNORED.some(ig => href.includes(ig))) return;
+
+      seenUrls.add(href);
+      postUrls.push(href);
+    });
+
+    const targetList = postUrls.slice(0, Math.min(count, 16));
+    const promises = targetList.map(async (url) => {
+      try {
+        const detail = await getCenamaflixPostDetail(url);
+        if (detail.success && detail.movie) {
+          return detail.movie;
+        }
+      } catch {
+        // ignore individual post error
+      }
+      return null;
+    });
+
+    const settled = await Promise.allSettled(promises);
+    const movies: MovieItem[] = [];
+    settled.forEach((s) => {
+      if (s.status === 'fulfilled' && s.value) {
+        movies.push(s.value);
+      }
+    });
+
+    const result = {
+      success: true,
+      source: 'Cenamaflix (cenamaflix.ir)',
+      type,
+      count: movies.length,
+      results: movies
+    };
+    setCenamaflixCache(cacheKey, result, 600);
+    return result;
   } catch (error: any) {
     return { success: false, error: error.message, results: [] };
   }
@@ -553,51 +819,69 @@ export async function getCenamaflixPostDetail(postUrl: string) {
   if (!postUrl || !postUrl.startsWith('http')) {
     return { success: false, error: 'Valid Cenamaflix post URL is required' };
   }
+  const cacheKey = `post:${postUrl}`;
+  const cached = getCenamaflixCache(cacheKey);
+  if (cached) return cached;
+
   try {
     const res = await fetch(postUrl, { headers: CENAMAFLIX_HEADERS, signal: AbortSignal.timeout(12000) });
     if (!res.ok) throw new Error(`Cenamaflix Detail HTTP ${res.status}`);
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    const title = $('h1.title, h1, .post-title, .single-title').first().text().trim();
-    const poster = $('.poster img, .movie-poster img, .single-header img, article img').first().attr('src') ||
-                   $('.poster img, .movie-poster img, .single-header img, article img').first().attr('data-src');
-    
+    const title = $('h1.title, h1, .post-title, .single-title').first().text().trim() || 'Cenamaflix Item';
+    const poster = $('.poster img, .movie-poster img, .single-header img, article img, img[src*="uploads"]').first().attr('src') ||
+                   $('.poster img, .movie-poster img, .single-header img, article img, img[data-src*="uploads"]').first().attr('data-src') ||
+                   $('meta[property="og:image"]').attr('content') || '';
+
     // Synopsis & Info
     const synopsis = $('.story, .synopsis, .description, .content p, .plot').text().trim() ||
-                     $('meta[name="description"]').attr('content');
-    
+                     $('meta[name="description"]').attr('content') || '';
+
     // IMDb & Meta
     let imdb = '';
-    const imdbText = $('.imdb, .score, .rating, :contains("IMDb"), :contains("امتیاز")').text();
-    const imdbMatch = imdbText.match(/(\d\.\d)/);
-    if (imdbMatch) imdb = imdbMatch[1];
+    const imdbFromIcon = $('.fa-imdb').parent().find('span').first().text().trim();
+    if (imdbFromIcon && /^\d+(\.\d+)?$/.test(imdbFromIcon)) {
+      imdb = imdbFromIcon;
+    } else {
+      const imdbText = $('.imdb, .score, .rating, :contains("IMDb"), :contains("امتیاز")').text();
+      const imdbMatch = imdbText.match(/(\d\.\d)/);
+      if (imdbMatch) imdb = imdbMatch[1];
+    }
 
-    // Download Links & Online Player
+    // Detect Year
+    let year: string | undefined = undefined;
+    const yearMatch = title.match(/(19\d\d|20\d\d)/) || postUrl.match(/(19\d\d|20\d\d)/);
+    if (yearMatch) year = yearMatch[1];
+
+    // Detect Type
+    const isSerie = title.includes('سریال') || postUrl.includes('/serial/') || postUrl.includes('season') || postUrl.includes('قسمت');
+    const type: 'movie' | 'serie' = isSerie ? 'serie' : 'movie';
+
+    // Extract Download Links (1080p, 720p, 480p, etc.)
+    const sources: { id?: number; quality: string; type: string; url: string; size?: string }[] = [];
     const downloadLinks: any[] = [];
-    const onlineStreams: any[] = [];
+    const seenDlUrls = new Set<string>();
 
-    // Extract data-video online player
-    $('[data-video]').each((_, el) => {
-      const vUrl = $(el).attr('data-video');
-      if (vUrl) {
-        onlineStreams.push({
-          type: 'online_stream',
-          url: vUrl
-        });
-      }
-    });
-
-    // Extract links in download sections
-    $('.my-download-section a, .download-box a, .dl-box a, a[href*=".mp4"], a[href*=".mkv"], a[href*="upera.tv"]').each((_, el) => {
+    $('.my-download-section a, .download-box a, .dl-box a, a[href*=".mp4"], a[href*=".mkv"], a[href*="upera.tv"], a[href*="/dl/"]').each((idx, el) => {
       const href = $(el).attr('href');
       const text = $(el).text().trim() || $(el).attr('title') || 'دانلود مستقیم';
-      if (href && (href.includes('upera.tv') || href.endsWith('.mp4') || href.endsWith('.mkv') || href.includes('/dl/'))) {
+      if (!href || seenDlUrls.has(href)) return;
+
+      if (href.includes('upera.tv') || href.endsWith('.mp4') || href.endsWith('.mkv') || href.includes('/dl/')) {
+        seenDlUrls.add(href);
         let quality = 'کیفیت اصلی';
         if (text.includes('1080') || href.includes('1080')) quality = '1080p';
         else if (text.includes('720') || href.includes('720')) quality = '720p';
         else if (text.includes('480') || href.includes('480')) quality = '480p';
         else if (text.includes('4k') || href.includes('2160')) quality = '4K';
+
+        sources.push({
+          id: idx + 1,
+          quality,
+          type: href.endsWith('.mkv') ? 'mkv' : 'mp4',
+          url: href
+        });
 
         downloadLinks.push({
           label: text,
@@ -607,33 +891,69 @@ export async function getCenamaflixPostDetail(postUrl: string) {
       }
     });
 
-    // Subtitle links
-    const subtitleLinks: any[] = [];
+    // Online Streams (data-video, iframes, etc.)
+    const onlineStreams: { type: string; url: string }[] = [];
+    $('[data-video]').each((_, el) => {
+      const vUrl = $(el).attr('data-video');
+      if (vUrl && !onlineStreams.some(s => s.url === vUrl)) {
+        onlineStreams.push({
+          type: 'online_stream',
+          url: vUrl
+        });
+      }
+    });
+
+    // Subtitles
+    const subtitles: { language: string; url: string }[] = [];
     $('a[href*=".srt"], a[href*=".zip"], a[href*="sub"], a:contains("زیرنویس")').each((_, el) => {
       const href = $(el).attr('href');
-      const text = $(el).text().trim() || 'زیرنویس فارسی';
-      if (href && !href.includes('/category/') && !href.includes('upera.tv')) {
-        subtitleLinks.push({
-          label: text,
+      if (href && !href.includes('/category/') && !href.includes('upera.tv') && !subtitles.some(s => s.url === href)) {
+        subtitles.push({
+          language: 'Persian',
           url: href
         });
       }
     });
 
-    return {
+    // Extract slug for id
+    const slug = postUrl.replace(/^https?:\/\/[^\/]+\//, '').replace(/\/$/, '') || String(Date.now());
+
+    // Uniform MovieItem representation (Exact same format as Darknama!)
+    const movie: MovieItem = {
+      id: slug,
+      title,
+      type,
+      year,
+      imdb: imdb || undefined,
+      rating: imdb || undefined,
+      description: synopsis || undefined,
+      image: poster || undefined,
+      cover: poster || undefined,
+      source_name: 'Cenamaflix',
+      post_url: postUrl,
+      sources,
+      subtitles,
+      online_streams: onlineStreams
+    };
+
+    const result = {
       success: true,
       source: 'Cenamaflix (cenamaflix.ir)',
       url: postUrl,
+      movie,
       post: {
-        title: title || 'Cenamaflix Title',
+        title,
         poster,
         imdb: imdb || undefined,
         synopsis,
         online_streams: onlineStreams,
         download_links: downloadLinks,
-        subtitle_links: subtitleLinks
+        subtitle_links: subtitles
       }
     };
+
+    setCenamaflixCache(cacheKey, result, 1800);
+    return result;
   } catch (error: any) {
     return { success: false, error: error.message };
   }

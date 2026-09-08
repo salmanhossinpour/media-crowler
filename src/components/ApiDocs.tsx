@@ -87,6 +87,40 @@ export const ApiDocs: React.FC = () => {
       ]
     },
     {
+      id: 'music_latest_songs',
+      category: 'music',
+      method: 'GET',
+      path: '/api/music/latest-songs',
+      title: 'جدیدترین آهنگ‌های رادیو جوان (Latest Songs)',
+      description: 'دریافت تازه‌ترین آهنگ‌های منتشر شده با لینک‌های مستقیم ۳۲۰، ۲۵۶، ۱۲۸، اطلاعات پخش و ترانه',
+      params: [
+        { name: 'count', type: 'number', required: false, description: 'تعداد آهنگ‌های درخواستی (پیش‌فرض ۴۰)', example: '30' }
+      ]
+    },
+    {
+      id: 'music_latest_playlists',
+      category: 'music',
+      method: 'GET',
+      path: '/api/music/latest-playlists',
+      title: 'جدیدترین پلی‌لیست‌های رادیو جوان (Latest Playlists)',
+      description: 'دریافت جدیدترین و به‌روزترین پلی‌لیست‌های رادیو جوان مرتب‌شده بر اساس تاریخ به‌روزرسانی (updated_at) با کاور و آمار',
+      params: [
+        { name: 'count', type: 'number', required: false, description: 'تعداد پلی‌لیست‌ها (پیش‌فرض ۳۰)', example: '24' }
+      ]
+    },
+    {
+      id: 'music_latest',
+      category: 'music',
+      method: 'GET',
+      path: '/api/music/latest',
+      title: 'عناوین جدید موزیک (آهنگ‌ها یا پلی‌لیست‌ها)',
+      description: 'دریافت یکجای جدیدترین آهنگ‌ها و/یا جدیدترین پلی‌لیست‌ها با فیلتر نوع',
+      params: [
+        { name: 'type', type: 'string', required: false, description: 'نوع محتوا: songs یا playlists یا all', example: 'songs' },
+        { name: 'count', type: 'number', required: false, description: 'تعداد موارد', example: '30' }
+      ]
+    },
+    {
       id: 'music_song',
       category: 'music',
       method: 'GET',

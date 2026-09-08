@@ -5,10 +5,13 @@ import {
   getRadioJavanArtist,
   getRadioJavanPlaylists,
   getRadioJavanPlaylistDetail,
+  getRadioJavanLatestSongs,
+  getRadioJavanLatestPlaylists,
   searchDarknama,
   getDarknamaLatest,
   getDarknamaSeriesSeasons,
   searchCenamaflix,
+  getCenamaflixLatest,
   getCenamaflixPostDetail,
   universalCrawler
 } from './crawler.ts';
@@ -48,10 +51,22 @@ export const API_DOCS = [
     method: 'GET',
     category: 'Movies & Series',
     title: 'آخرین فیلم‌ها و سریال‌ها',
-    description: 'دریافت جدیدترین عناوین اضافه شده همراه با کیفیت‌ها و اطلاعات کامل',
+    description: 'دریافت جدیدترین عناوین اضافه شده از دارک‌نما و سینمافلیکس همراه با تمام کیفیت‌ها و لینک‌های دانلود مستقیم یکجا',
     parameters: [
       { name: 'type', type: 'string', required: false, description: 'نوع: movie یا serie', example: 'movie' },
+      { name: 'source', type: 'string', required: false, description: 'منبع: all (هر دو منبع)، darknama، یا cenamaflix', example: 'all' },
       { name: 'count', type: 'number', required: false, description: 'تعداد نتایج (پیش‌فرض 20)', example: '20' }
+    ]
+  },
+  {
+    endpoint: '/api/movies/cenamaflix-latest',
+    method: 'GET',
+    category: 'Movies & Series',
+    title: 'جدیدترین‌های سینمافلیکس با لینک مستقیم',
+    description: 'دریافت یکجای عناوین جدید سینمافلیکس همراه با کیفیت‌های دانلود مستقیم (1080p, 720p, 480p) درست مانند دارک‌نما',
+    parameters: [
+      { name: 'type', type: 'string', required: false, description: 'نوع: movie یا serie یا all', example: 'movie' },
+      { name: 'count', type: 'number', required: false, description: 'تعداد نتایج (پیش‌فرض 16)', example: '16' }
     ]
   },
   {
@@ -92,6 +107,37 @@ export const API_DOCS = [
         playlists: [{ id: '09385e59d4df', title: 'Summer Time' }]
       }
     }
+  },
+  {
+    endpoint: '/api/music/latest-songs',
+    method: 'GET',
+    category: 'Radio Javan Music',
+    title: 'جدیدترین آهنگ‌های رادیو جوان (Latest Songs)',
+    description: 'دریافت تازه‌ترین آهنگ‌های منتشر شده همراه با تمام لینک‌های مستقیم دانلود ۳۲۰، ۲۵۶، ۱۲۸ و اطلاعات پخش',
+    parameters: [
+      { name: 'count', type: 'number', required: false, description: 'تعداد آهنگ‌های درخواستی (پیش‌فرض ۴۰)', example: '30' }
+    ]
+  },
+  {
+    endpoint: '/api/music/latest-playlists',
+    method: 'GET',
+    category: 'Radio Javan Music',
+    title: 'جدیدترین پلی‌لیست‌های رادیو جوان (Latest Playlists)',
+    description: 'دریافت جدیدترین و به‌روزترین پلی‌لیست‌های رادیو جوان مرتب‌شده بر اساس تاریخ به‌روزرسانی',
+    parameters: [
+      { name: 'count', type: 'number', required: false, description: 'تعداد پلی‌لیست‌ها (پیش‌فرض ۳۰)', example: '24' }
+    ]
+  },
+  {
+    endpoint: '/api/music/latest',
+    method: 'GET',
+    category: 'Radio Javan Music',
+    title: 'عناوین جدید موزیک (آهنگ‌ها یا پلی‌لیست‌ها)',
+    description: 'دریافت یکجای جدیدترین آهنگ‌ها و/یا جدیدترین پلی‌لیست‌ها',
+    parameters: [
+      { name: 'type', type: 'string', required: false, description: 'نوع: songs یا playlists یا all (پیش‌فرض songs)', example: 'songs' },
+      { name: 'count', type: 'number', required: false, description: 'تعداد موارد', example: '30' }
+    ]
   },
   {
     endpoint: '/api/music/song',
@@ -199,32 +245,64 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
         darknamaResults = await searchDarknama(q);
       }
       if (source === 'cenamaflix' || source === 'all') {
-        cenamaflixResults = await searchCenamaflix(q);
+        // Full details mode: extracts all download links, qualities, posters in one go, just like Darknama!
+        cenamaflixResults = await searchCenamaflix(q, true);
       }
+
+      const combinedResults = [
+        ...(darknamaResults.results || []),
+        ...(cenamaflixResults.results || [])
+      ];
 
       res.statusCode = 200;
       res.end(JSON.stringify({
         success: true,
         query: q,
         source,
-        total: (darknamaResults.results?.length || 0) + (cenamaflixResults.results?.length || 0),
+        total: combinedResults.length,
+        results: combinedResults,
         darknama: darknamaResults.results || [],
         cenamaflix: cenamaflixResults.results || []
       }));
       return;
     }
 
-    // 4. Movies Latest
+    // 4. Movies Latest (Darknama + Cenamaflix)
     if (pathname === '/api/movies/latest') {
       const type = (searchParams.get('type') === 'serie' ? 'serie' : 'movie') as 'movie' | 'serie';
+      const source = searchParams.get('source') || 'all';
       const count = parseInt(searchParams.get('count') || '20', 10);
-      const data = await getDarknamaLatest(type, count);
-      res.statusCode = data.success ? 200 : 500;
-      res.end(JSON.stringify(data));
+
+      let darknamaItems: any[] = [];
+      let cenamaflixItems: any[] = [];
+
+      if (source === 'darknama' || source === 'all') {
+        const dData = await getDarknamaLatest(type, count);
+        if (dData.success) darknamaItems = dData.results || [];
+      }
+      if (source === 'cenamaflix' || source === 'all') {
+        const cData = await getCenamaflixLatest(type, Math.min(count, 16));
+        if (cData.success) cenamaflixItems = cData.results || [];
+      }
+
+      const combined = source === 'darknama' ? darknamaItems :
+                       source === 'cenamaflix' ? cenamaflixItems :
+                       [...darknamaItems, ...cenamaflixItems];
+
+      res.statusCode = 200;
+      res.end(JSON.stringify({
+        success: true,
+        type,
+        source,
+        count: combined.length,
+        results: combined,
+        darknama: darknamaItems,
+        cenamaflix: cenamaflixItems
+      }));
       return;
     }
 
-    // 5. TV Series Seasons
+    // 5. TV Series Seasons (Darknama)
     if (pathname === '/api/movies/seasons') {
       const id = searchParams.get('id');
       if (!id) {
@@ -238,7 +316,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
       return;
     }
 
-    // 6. Cenamaflix Post Crawler
+    // 6. Cenamaflix Post Crawler & Extractor
     if (pathname === '/api/movies/cenamaflix-post') {
       const postUrl = searchParams.get('url');
       if (!postUrl) {
@@ -247,6 +325,16 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
         return;
       }
       const data = await getCenamaflixPostDetail(postUrl);
+      res.statusCode = data.success ? 200 : 500;
+      res.end(JSON.stringify(data));
+      return;
+    }
+
+    // 6b. Cenamaflix Latest
+    if (pathname === '/api/movies/cenamaflix-latest') {
+      const type = (searchParams.get('type') === 'serie' ? 'serie' : 'movie') as 'movie' | 'serie';
+      const count = parseInt(searchParams.get('count') || '16', 10);
+      const data = await getCenamaflixLatest(type, count);
       res.statusCode = data.success ? 200 : 500;
       res.end(JSON.stringify(data));
       return;
@@ -312,6 +400,57 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
       }
       const data = await getRadioJavanPlaylistDetail(id);
       res.statusCode = data.success ? 200 : 404;
+      res.end(JSON.stringify(data));
+      return;
+    }
+
+    // 11b. Music Latest Songs
+    if (pathname === '/api/music/latest-songs') {
+      const count = parseInt(searchParams.get('count') || '36', 10);
+      const data = await getRadioJavanLatestSongs(count);
+      res.statusCode = data.success ? 200 : 500;
+      res.end(JSON.stringify(data));
+      return;
+    }
+
+    // 11c. Music Latest Playlists
+    if (pathname === '/api/music/latest-playlists') {
+      const count = parseInt(searchParams.get('count') || '30', 10);
+      const data = await getRadioJavanLatestPlaylists(count);
+      res.statusCode = data.success ? 200 : 500;
+      res.end(JSON.stringify(data));
+      return;
+    }
+
+    // 11d. Music Latest (General)
+    if (pathname === '/api/music/latest') {
+      const type = searchParams.get('type') || 'songs';
+      const count = parseInt(searchParams.get('count') || '30', 10);
+
+      if (type === 'playlists') {
+        const data = await getRadioJavanLatestPlaylists(count);
+        res.statusCode = data.success ? 200 : 500;
+        res.end(JSON.stringify(data));
+        return;
+      }
+
+      if (type === 'all') {
+        const [songsData, playlistsData] = await Promise.all([
+          getRadioJavanLatestSongs(count),
+          getRadioJavanLatestPlaylists(count)
+        ]);
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          success: true,
+          songs: songsData.songs || [],
+          playlists: playlistsData.playlists || []
+        }));
+        return;
+      }
+
+      // Default: songs
+      const data = await getRadioJavanLatestSongs(count);
+      res.statusCode = data.success ? 200 : 500;
       res.end(JSON.stringify(data));
       return;
     }

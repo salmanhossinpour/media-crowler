@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Music, User, ListMusic, Download, Play, Pause, 
   Copy, Check, FileText, ExternalLink, Code2, Heart, Headphones, 
-  X, RefreshCw, AlertCircle, Share2, Sparkles
+  X, RefreshCw, AlertCircle, Share2, Sparkles, Flame, Radio, Calendar, Layers
 } from 'lucide-react';
 import type { RJSong, RJArtist, RJPlaylist } from '../types';
 
@@ -20,7 +20,7 @@ export const MusicStudio: React.FC<MusicStudioProps> = ({
   onTogglePlay
 }) => {
   const [query, setQuery] = useState('Shadmehr Aghili');
-  const [activeCategory, setActiveCategory] = useState<'songs' | 'artists' | 'playlists'>('songs');
+  const [activeCategory, setActiveCategory] = useState<'latest_songs' | 'latest_playlists' | 'songs' | 'artists' | 'playlists'>('latest_songs');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,6 +28,12 @@ export const MusicStudio: React.FC<MusicStudioProps> = ({
   const [songs, setSongs] = useState<RJSong[]>([]);
   const [artists, setArtists] = useState<any[]>([]);
   const [playlists, setPlaylists] = useState<any[]>([]);
+
+  // Newest content state
+  const [latestSongs, setLatestSongs] = useState<RJSong[]>([]);
+  const [latestSongsLoading, setLatestSongsLoading] = useState(false);
+  const [latestPlaylists, setLatestPlaylists] = useState<RJPlaylist[]>([]);
+  const [latestPlaylistsLoading, setLatestPlaylistsLoading] = useState(false);
 
   // Detailed views
   const [selectedArtist, setSelectedArtist] = useState<RJArtist | null>(null);
@@ -46,10 +52,43 @@ export const MusicStudio: React.FC<MusicStudioProps> = ({
 
   const quickSearches = ['Shadmehr Aghili', 'Ebi', 'Hayedeh', 'Sogand', 'Alireza Talischi', 'Mohsen Yeganeh', 'Donya'];
 
+  const loadLatestSongs = async (force = false) => {
+    if (latestSongs.length > 0 && !force) return;
+    setLatestSongsLoading(true);
+    try {
+      const res = await fetch('/api/music/latest-songs?count=40');
+      const data = await res.json();
+      if (data.success && data.songs) {
+        setLatestSongs(data.songs);
+      }
+    } catch (err: any) {
+      console.error('Error fetching latest songs:', err);
+    } finally {
+      setLatestSongsLoading(false);
+    }
+  };
+
+  const loadLatestPlaylists = async (force = false) => {
+    if (latestPlaylists.length > 0 && !force) return;
+    setLatestPlaylistsLoading(true);
+    try {
+      const res = await fetch('/api/music/latest-playlists?count=30');
+      const data = await res.json();
+      if (data.success && data.playlists) {
+        setLatestPlaylists(data.playlists);
+      }
+    } catch (err: any) {
+      console.error('Error fetching latest playlists:', err);
+    } finally {
+      setLatestPlaylistsLoading(false);
+    }
+  };
+
   const executeSearch = async (searchQuery = query) => {
     if (!searchQuery.trim()) return;
     setLoading(true);
     setError(null);
+    setActiveCategory('songs');
 
     try {
       const res = await fetch(`/api/music/search?q=${encodeURIComponent(searchQuery.trim())}`);
@@ -126,8 +165,149 @@ export const MusicStudio: React.FC<MusicStudioProps> = ({
 
   // Initial load
   useEffect(() => {
+    loadLatestSongs();
+    loadLatestPlaylists();
     executeSearch('Shadmehr Aghili');
   }, []);
+
+  const renderSongCard = (song: RJSong, isLatest = false) => {
+    const isCurrent = currentTrack?.id === song.id;
+    return (
+      <div
+        key={song.id}
+        className={`bg-slate-900/60 border rounded-2xl p-4 transition-all flex flex-col justify-between group shadow-lg ${
+          isCurrent ? 'border-cyan-500 bg-cyan-950/20' : 'border-slate-800/80 hover:border-slate-700'
+        }`}
+      >
+        {/* Top Song info with artwork */}
+        <div className="flex items-start gap-3.5 mb-3">
+          <div className="relative w-20 h-20 rounded-xl overflow-hidden bg-slate-950 shrink-0 shadow-md group/art">
+            <img
+              src={song.photo || song.thumbnail}
+              alt={song.title}
+              className="w-full h-full object-cover group-hover/art:scale-105 transition-transform"
+            />
+            <button
+              onClick={() => {
+                if (isCurrent) onTogglePlay();
+                else onPlayTrack(song);
+              }}
+              className="absolute inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center text-white opacity-0 group-hover/art:opacity-100 transition-opacity"
+            >
+              {isCurrent && isPlaying ? (
+                <Pause className="w-7 h-7 fill-white text-white" />
+              ) : (
+                <Play className="w-7 h-7 fill-white text-white ml-0.5" />
+              )}
+            </button>
+            {isLatest && (
+              <span className="absolute top-1 right-1 bg-cyan-500 text-slate-950 text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                NEW
+              </span>
+            )}
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <h3 className="font-bold text-white text-sm sm:text-base line-clamp-1 mb-0.5" title={song.song || song.title}>
+              {song.song_farsi || song.song || song.title}
+            </h3>
+            <button
+              onClick={() => {
+                setActiveCategory('artists');
+                loadArtistDetails(song.artist);
+              }}
+              className="text-xs text-cyan-400 hover:underline line-clamp-1 mb-2 font-medium"
+            >
+              {song.artist_farsi || song.artist}
+            </button>
+
+            {/* Stats */}
+            <div className="flex items-center gap-3 text-[11px] text-slate-400 flex-wrap">
+              {song.plays && (
+                <span className="flex items-center gap-1">
+                  <Headphones className="w-3 h-3 text-slate-500" />
+                  {typeof song.plays === 'number' ? song.plays.toLocaleString('fa-IR') : song.plays}
+                </span>
+              )}
+              {song.release_date && (
+                <span className="flex items-center gap-1 text-[10px] text-slate-500">
+                  <Calendar className="w-3 h-3" />
+                  {new Date(song.release_date).toLocaleDateString('fa-IR')}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Download Links & Lyrics */}
+        <div className="pt-3 border-t border-slate-800/70 space-y-2">
+          {/* Download Buttons grid */}
+          <div className="grid grid-cols-2 gap-1.5 text-xs">
+            {song.download_links.mp3_320 && (
+              <a
+                href={song.download_links.mp3_320}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-800/60 text-cyan-200 py-1.5 px-2.5 rounded-lg flex items-center justify-between transition-colors"
+              >
+                <span>دانلود 320</span>
+                <Download className="w-3 h-3 text-cyan-400" />
+              </a>
+            )}
+
+            {(song.download_links.mp3_256 || song.download_links.mp3_128) && (
+              <a
+                href={song.download_links.mp3_256 || song.download_links.mp3_128}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-slate-800/80 hover:bg-slate-700 text-slate-200 py-1.5 px-2.5 rounded-lg flex items-center justify-between transition-colors"
+              >
+                <span>دانلود {song.download_links.mp3_256 ? '256' : '128'}</span>
+                <Download className="w-3 h-3 text-slate-400" />
+              </a>
+            )}
+          </div>
+
+          {/* Lyrics & JSON action line */}
+          <div className="flex items-center justify-between text-[11px] pt-1">
+            <button
+              onClick={() => viewLyrics(song)}
+              className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium transition-colors"
+            >
+              <FileText className="w-3 h-3" />
+              <span>متن ترانه (شعر)</span>
+            </button>
+
+            <div className="flex items-center gap-2">
+              {song.download_links.mp3_320 && (
+                <button
+                  onClick={() => copyToClipboard(song.download_links.mp3_320!)}
+                  className="text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                  title="کپی لینک مستقیم MP3 320"
+                >
+                  {copiedUrl === song.download_links.mp3_320 ? (
+                    <Check className="w-3 h-3 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3 h-3" />
+                  )}
+                  <span>کپی لینک</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setJsonModalData(song)}
+                className="text-slate-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
+              >
+                <Code2 className="w-3 h-3" />
+                <span>JSON</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -177,33 +357,76 @@ export const MusicStudio: React.FC<MusicStudioProps> = ({
             ))}
           </div>
 
-          <div className="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
+          <div className="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-slate-800 flex-wrap">
+            <button
+              onClick={() => {
+                setActiveCategory('latest_songs');
+                if (latestSongs.length === 0) loadLatestSongs();
+              }}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all text-xs sm:text-sm ${
+                activeCategory === 'latest_songs' ? 'bg-cyan-500 text-slate-950 font-semibold shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>جدیدترین آهنگ‌ها</span>
+              <span className="bg-slate-900/60 text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full">
+                {latestSongs.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveCategory('latest_playlists');
+                if (latestPlaylists.length === 0) loadLatestPlaylists();
+              }}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all text-xs sm:text-sm ${
+                activeCategory === 'latest_playlists' ? 'bg-cyan-500 text-slate-950 font-semibold shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>جدیدترین پلی‌لیست‌ها</span>
+              <span className="bg-slate-900/60 text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full">
+                {latestPlaylists.length}
+              </span>
+            </button>
+
             <button
               onClick={() => setActiveCategory('songs')}
-              className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
-                activeCategory === 'songs' ? 'bg-cyan-500 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all text-xs sm:text-sm ${
+                activeCategory === 'songs' ? 'bg-cyan-500 text-slate-950 font-semibold shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
               <Music className="w-3.5 h-3.5" />
-              <span>آهنگ‌ها ({songs.length})</span>
+              <span>جستجوی آهنگ‌ها</span>
+              <span className="bg-slate-900/60 text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full">
+                {songs.length}
+              </span>
             </button>
+
             <button
               onClick={() => setActiveCategory('artists')}
-              className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
-                activeCategory === 'artists' ? 'bg-cyan-500 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all text-xs sm:text-sm ${
+                activeCategory === 'artists' ? 'bg-cyan-500 text-slate-950 font-semibold shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
               <User className="w-3.5 h-3.5" />
-              <span>خواننده‌ها ({artists.length})</span>
+              <span>خواننده‌ها</span>
+              <span className="bg-slate-900/60 text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full">
+                {artists.length}
+              </span>
             </button>
+
             <button
               onClick={() => setActiveCategory('playlists')}
-              className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
-                activeCategory === 'playlists' ? 'bg-cyan-500 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all text-xs sm:text-sm ${
+                activeCategory === 'playlists' ? 'bg-cyan-500 text-slate-950 font-semibold shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
-              <ListMusic className="w-3.5 h-3.5" />
-              <span>پلی‌لیست‌ها ({playlists.length})</span>
+              <Layers className="w-3.5 h-3.5" />
+              <span>دسته‌بندی‌ها</span>
+              <span className="bg-slate-900/60 text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full">
+                {playlists.length}
+              </span>
             </button>
           </div>
         </div>
@@ -234,7 +457,220 @@ export const MusicStudio: React.FC<MusicStudioProps> = ({
       {!loading && (
         <div className="space-y-6">
 
-          {/* 1. Songs Grid */}
+          {/* 1. Latest Songs Tab */}
+          {activeCategory === 'latest_songs' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 p-4 rounded-2xl">
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-cyan-400" />
+                    <span>جدیدترین آهنگ‌های رادیو جوان (Latest Songs)</span>
+                    <span className="bg-cyan-500/20 text-cyan-300 text-xs px-2.5 py-0.5 rounded-full border border-cyan-500/30">
+                      {latestSongs.length} ترک تازه
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    جدیدترین آهنگ‌ها و ریمیکس‌های منتشر شده با لینک مستقیم ۳۲۰، ۲۵۶ و ۱۲۸ کیلوبیت
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => loadLatestSongs(true)}
+                  disabled={latestSongsLoading}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all self-start sm:self-auto shrink-0 border border-slate-700"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${latestSongsLoading ? 'animate-spin text-cyan-400' : ''}`} />
+                  <span>بروزرسانی جدیدترین‌ها</span>
+                </button>
+              </div>
+
+              {latestSongsLoading && latestSongs.length === 0 && (
+                <div className="py-20 flex flex-col items-center justify-center gap-3 text-slate-400">
+                  <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
+                  <p className="text-sm font-medium">در حال واکشی تازه‌ترین آهنگ‌های رادیو جوان...</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {latestSongs.map((song) => renderSongCard(song, true))}
+              </div>
+            </div>
+          )}
+
+          {/* 2. Latest Playlists Tab */}
+          {activeCategory === 'latest_playlists' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 p-4 rounded-2xl">
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <Radio className="w-5 h-5 text-cyan-400" />
+                    <span>جدیدترین پلی‌لیست‌های رادیو جوان (Latest Playlists)</span>
+                    <span className="bg-cyan-500/20 text-cyan-300 text-xs px-2.5 py-0.5 rounded-full border border-cyan-500/30">
+                      {latestPlaylists.length} پلی‌لیست
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    مرتب‌شده بر اساس آخرین به‌روزرسانی و جدیدترین تغییرات در رادیو جوان
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => loadLatestPlaylists(true)}
+                  disabled={latestPlaylistsLoading}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all self-start sm:self-auto shrink-0 border border-slate-700"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${latestPlaylistsLoading ? 'animate-spin text-cyan-400' : ''}`} />
+                  <span>بروزرسانی پلی‌لیست‌ها</span>
+                </button>
+              </div>
+
+              {latestPlaylistsLoading && latestPlaylists.length === 0 && (
+                <div className="py-20 flex flex-col items-center justify-center gap-3 text-slate-400">
+                  <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
+                  <p className="text-sm font-medium">در حال مرتب‌سازی و دریافت جدیدترین پلی‌لیست‌ها...</p>
+                </div>
+              )}
+
+              {/* Detailed Playlist Tracklist if selected */}
+              {selectedPlaylist && !playlistLoading && (
+                <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl">
+                  <div className="flex items-start justify-between border-b border-slate-800 pb-4 mb-4">
+                    <div className="flex items-center gap-4">
+                      {selectedPlaylist.photo && (
+                        <img
+                          src={selectedPlaylist.photo}
+                          alt={selectedPlaylist.title}
+                          className="w-20 h-20 rounded-xl object-cover shadow-lg"
+                        />
+                      )}
+                      <div>
+                        <h3 className="text-lg font-bold text-white">{selectedPlaylist.title}</h3>
+                        <p className="text-xs text-slate-400">
+                          {selectedPlaylist.tracks?.length} آهنگ • {selectedPlaylist.followers?.toLocaleString('fa-IR')} دنبال‌کننده
+                        </p>
+                        {selectedPlaylist.category && (
+                          <span className="inline-block mt-1 text-[11px] bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded-md border border-cyan-800/60">
+                            دسته‌بندی: {selectedPlaylist.category}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setSelectedPlaylist(null)}
+                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center gap-1 text-xs"
+                    >
+                      <X className="w-4 h-4" />
+                      <span>بازگشت به لیست</span>
+                    </button>
+                  </div>
+
+                  {/* Tracks list */}
+                  <div className="space-y-2">
+                    {selectedPlaylist.tracks?.map((track, idx) => (
+                      <div
+                        key={idx}
+                        className="bg-slate-950 border border-slate-800/80 p-3 rounded-xl flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-slate-500 font-mono w-4">{idx + 1}</span>
+                          <img
+                            src={track.photo || track.thumbnail}
+                            alt={track.title}
+                            className="w-9 h-9 rounded-lg object-cover"
+                          />
+                          <div>
+                            <span className="font-bold text-white block">{track.song || track.title}</span>
+                            <span className="text-slate-400 text-[11px]">{track.artist}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => onPlayTrack(track)}
+                            className="p-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-lg"
+                            title="پخش"
+                          >
+                            <Play className="w-3.5 h-3.5" />
+                          </button>
+                          {track.download_links.mp3_320 && (
+                            <a
+                              href={track.download_links.mp3_320}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg"
+                              title="دانلود ۳۲۰"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          <button
+                            onClick={() => viewLyrics(track)}
+                            className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 rounded-lg"
+                            title="متن ترانه"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Playlists grid */}
+              {!selectedPlaylist && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {latestPlaylists.map((pl) => (
+                    <div
+                      key={pl.id}
+                      onClick={() => loadPlaylistDetails(pl.id)}
+                      className="bg-slate-900/60 border border-slate-800/80 hover:border-cyan-500/50 p-4 rounded-2xl flex flex-col justify-between cursor-pointer transition-all group shadow-lg"
+                    >
+                      <div className="flex items-start gap-3.5 mb-3">
+                        <img
+                          src={pl.photo}
+                          alt={pl.title}
+                          className="w-20 h-20 rounded-xl object-cover bg-slate-950 shrink-0 shadow-md group-hover:scale-105 transition-transform"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-[10px] bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded-md border border-cyan-800/60 truncate">
+                              {pl.is_featured ? 'ویژه رادیو جوان' : (pl.category || 'پلی‌لیست')}
+                            </span>
+                            {pl.is_featured && (
+                              <span className="text-[10px] bg-amber-950 text-amber-300 px-1.5 py-0.5 rounded-md border border-amber-800/60">
+                                Featured
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="font-bold text-white text-sm truncate group-hover:text-cyan-300 transition-colors">
+                            {pl.title}
+                          </h4>
+                          <span className="text-xs text-slate-400 block mt-1">
+                            {pl.items_count || 0} آهنگ • {pl.followers?.toLocaleString('fa-IR')} دنبال‌کننده
+                          </span>
+                          {pl.updated_at && (
+                            <span className="text-[11px] text-slate-500 block mt-1 flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              <span>آخرین بروزرسانی: {new Date(pl.updated_at).toLocaleDateString('fa-IR')}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-cyan-400 group-hover:text-cyan-300">
+                        <span>مشاهده ترک‌ها و دانلود</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 3. Search Songs Grid */}
           {activeCategory === 'songs' && (
             <div>
               <div className="flex items-center justify-between mb-4">
@@ -248,139 +684,7 @@ export const MusicStudio: React.FC<MusicStudioProps> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {songs.map((song) => {
-                  const isCurrent = currentTrack?.id === song.id;
-                  return (
-                    <div
-                      key={song.id}
-                      className={`bg-slate-900/60 border rounded-2xl p-4 transition-all flex flex-col justify-between group shadow-lg ${
-                        isCurrent ? 'border-cyan-500 bg-cyan-950/20' : 'border-slate-800/80 hover:border-slate-700'
-                      }`}
-                    >
-                      {/* Top Song info with artwork */}
-                      <div className="flex items-start gap-3.5 mb-3">
-                        <div className="relative w-20 h-20 rounded-xl overflow-hidden bg-slate-950 shrink-0 shadow-md group/art">
-                          <img
-                            src={song.photo || song.thumbnail}
-                            alt={song.title}
-                            className="w-full h-full object-cover group-hover/art:scale-105 transition-transform"
-                          />
-                          <button
-                            onClick={() => {
-                              if (isCurrent) onTogglePlay();
-                              else onPlayTrack(song);
-                            }}
-                            className="absolute inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center text-white opacity-0 group-hover/art:opacity-100 transition-opacity"
-                          >
-                            {isCurrent && isPlaying ? (
-                              <Pause className="w-7 h-7 fill-white text-white" />
-                            ) : (
-                              <Play className="w-7 h-7 fill-white text-white ml-0.5" />
-                            )}
-                          </button>
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-white text-sm sm:text-base line-clamp-1 mb-0.5" title={song.song || song.title}>
-                            {song.song_farsi || song.song || song.title}
-                          </h3>
-                          <button
-                            onClick={() => {
-                              setActiveCategory('artists');
-                              loadArtistDetails(song.artist);
-                            }}
-                            className="text-xs text-cyan-400 hover:underline line-clamp-1 mb-2 font-medium"
-                          >
-                            {song.artist_farsi || song.artist}
-                          </button>
-
-                          {/* Stats */}
-                          <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                            {song.plays && (
-                              <span className="flex items-center gap-1">
-                                <Headphones className="w-3 h-3 text-slate-500" />
-                                {typeof song.plays === 'number' ? song.plays.toLocaleString('fa-IR') : song.plays}
-                              </span>
-                            )}
-                            {song.likes && (
-                              <span className="flex items-center gap-1">
-                                <Heart className="w-3 h-3 text-rose-500" />
-                                {typeof song.likes === 'number' ? song.likes.toLocaleString('fa-IR') : song.likes}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Download Links & Lyrics */}
-                      <div className="pt-3 border-t border-slate-800/70 space-y-2">
-                        {/* Download Buttons grid */}
-                        <div className="grid grid-cols-2 gap-1.5 text-xs">
-                          {song.download_links.mp3_320 && (
-                            <a
-                              href={song.download_links.mp3_320}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-800/60 text-cyan-200 py-1.5 px-2.5 rounded-lg flex items-center justify-between transition-colors"
-                            >
-                              <span>دانلود 320</span>
-                              <Download className="w-3 h-3 text-cyan-400" />
-                            </a>
-                          )}
-
-                          {song.download_links.mp3_128 && (
-                            <a
-                              href={song.download_links.mp3_128}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="bg-slate-800/80 hover:bg-slate-700 text-slate-200 py-1.5 px-2.5 rounded-lg flex items-center justify-between transition-colors"
-                            >
-                              <span>دانلود 128</span>
-                              <Download className="w-3 h-3 text-slate-400" />
-                            </a>
-                          )}
-                        </div>
-
-                        {/* Lyrics & JSON action line */}
-                        <div className="flex items-center justify-between text-[11px] pt-1">
-                          <button
-                            onClick={() => viewLyrics(song)}
-                            className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium transition-colors"
-                          >
-                            <FileText className="w-3 h-3" />
-                            <span>متن ترانه (شعر)</span>
-                          </button>
-
-                          <div className="flex items-center gap-2">
-                            {song.download_links.mp3_320 && (
-                              <button
-                                onClick={() => copyToClipboard(song.download_links.mp3_320!)}
-                                className="text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
-                                title="کپی لینک مستقیم MP3 320"
-                              >
-                                {copiedUrl === song.download_links.mp3_320 ? (
-                                  <Check className="w-3 h-3 text-emerald-400" />
-                                ) : (
-                                  <Copy className="w-3 h-3" />
-                                )}
-                                <span>کپی لینک</span>
-                              </button>
-                            )}
-
-                            <button
-                              onClick={() => setJsonModalData(song)}
-                              className="text-slate-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
-                            >
-                              <Code2 className="w-3 h-3" />
-                              <span>JSON</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-                  );
-                })}
+                {songs.map((song) => renderSongCard(song, false))}
               </div>
             </div>
           )}

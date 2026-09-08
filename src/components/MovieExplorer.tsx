@@ -50,13 +50,13 @@ export const MovieExplorer: React.FC = () => {
     }
   };
 
-  const loadLatest = async (type: 'movie' | 'serie') => {
+  const loadLatest = async (type: 'movie' | 'serie', targetSource = source) => {
     setLoading(true);
     setError(null);
     setActiveTab(type === 'movie' ? 'latest_movies' : 'latest_series');
 
     try {
-      const res = await fetch(`/api/movies/latest?type=${type}&count=24`);
+      const res = await fetch(`/api/movies/latest?type=${type}&count=24&source=${targetSource}`);
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'خطا در دریافت عناوین جدید');
       setLatestResults(data.results || []);
@@ -238,11 +238,13 @@ export const MovieExplorer: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <Film className="w-5 h-5 text-cyan-400" />
                   <h2 className="text-base sm:text-lg font-bold text-white">
-                    {activeTab === 'search' ? `عناوین دارک‌نما (Darknama) (${darknamaResults.length})` : 'جدیدترین عناوین دارک‌نما'}
+                    {activeTab === 'search' 
+                      ? `عناوین دارک‌نما (Darknama) (${darknamaResults.length})` 
+                      : `جدیدترین عناوین (${(latestResults).length})${source === 'all' ? ' - دارک‌نما و سینمافلیکس' : source === 'cenamaflix' ? ' - سینمافلیکس' : ' - دارک‌نما'}`}
                   </h2>
                 </div>
                 <span className="text-xs text-slate-400 font-mono">
-                  منبع: server-hi-speed-iran.info (دارک‌نما)
+                  {activeTab === 'search' ? 'منبع: دارک‌نما (Darknama)' : 'دارک‌نما + سینمافلیکس (همگام‌سازی شده)'}
                 </span>
               </div>
 
@@ -267,11 +269,22 @@ export const MovieExplorer: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Type Badge */}
-                      <span className="absolute top-2.5 right-2.5 bg-slate-950/80 backdrop-blur-md border border-slate-800 text-[11px] px-2 py-0.5 rounded-md font-semibold text-cyan-300 flex items-center gap-1">
-                        {movie.type === 'serie' ? <Tv className="w-3 h-3" /> : <Film className="w-3 h-3" />}
-                        {movie.type === 'serie' ? 'سریال' : 'فیلم'}
-                      </span>
+                      {/* Source & Type Badge */}
+                      <div className="absolute top-2.5 right-2.5 flex items-center gap-1">
+                        {movie.source_name && (
+                          <span className={`backdrop-blur-md border text-[10px] px-2 py-0.5 rounded-md font-semibold ${
+                            movie.source_name === 'Cenamaflix'
+                              ? 'bg-amber-950/85 border-amber-800/80 text-amber-300'
+                              : 'bg-cyan-950/85 border-cyan-800/80 text-cyan-300'
+                          }`}>
+                            {movie.source_name === 'Cenamaflix' ? 'سینمافلیکس' : 'دارک‌نما'}
+                          </span>
+                        )}
+                        <span className="bg-slate-950/80 backdrop-blur-md border border-slate-800 text-[10px] px-2 py-0.5 rounded-md font-semibold text-slate-200 flex items-center gap-1">
+                          {movie.type === 'serie' ? <Tv className="w-3 h-3 text-indigo-400" /> : <Film className="w-3 h-3 text-cyan-400" />}
+                          {movie.type === 'serie' ? 'سریال' : 'فیلم'}
+                        </span>
+                      </div>
 
                       {/* IMDb Badge */}
                       {movie.imdb && (
@@ -447,25 +460,68 @@ export const MovieExplorer: React.FC = () => {
                         <h3 className="font-bold text-white text-sm sm:text-base line-clamp-2 mb-2" title={item.title}>
                           {item.title}
                         </h3>
-                        {item.snippet && (
+
+                        {item.description && (
+                          <p className="text-xs text-slate-400 line-clamp-2 mb-3">
+                            {item.description}
+                          </p>
+                        )}
+                        {!item.description && item.snippet && (
                           <p className="text-xs text-slate-400 line-clamp-2 mb-3">
                             {item.snippet}
                           </p>
                         )}
                       </div>
 
+                      {/* Action buttons & Direct Download Links (Just like Darknama!) */}
                       <div className="pt-3 border-t border-slate-800/60 space-y-2">
-                        <button
-                          onClick={() => loadCenamaflixPost(item)}
-                          className="w-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-xs py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-colors font-semibold"
-                        >
-                          <Download className="w-3.5 h-3.5 text-amber-400" />
-                          <span>استخراج لینک‌های دانلود و پخش آنلاین</span>
-                        </button>
+                        {/* Direct Download Links Grid */}
+                        {item.sources && item.sources.length > 0 ? (
+                          <div className="space-y-1.5">
+                            <span className="text-[11px] text-amber-400 font-medium block">
+                              لینک‌های دانلود مستقیم ({item.sources.length} کیفیت):
+                            </span>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {item.sources.map((src, sIdx) => (
+                                <a
+                                  key={sIdx}
+                                  href={src.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-amber-950/60 hover:bg-amber-900/80 border border-amber-800/50 text-amber-200 text-xs px-2.5 py-1.5 rounded-lg flex items-center justify-between transition-colors group/link"
+                                >
+                                  <span className="truncate">{src.quality || 'دانلود'}</span>
+                                  <Download className="w-3.5 h-3.5 text-amber-400 group-hover/link:translate-y-0.5 transition-transform shrink-0" />
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => loadCenamaflixPost(item)}
+                            className="w-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-xs py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-colors font-semibold"
+                          >
+                            <Download className="w-3.5 h-3.5 text-amber-400" />
+                            <span>استخراج لینک‌های دانلود و پخش آنلاین</span>
+                          </button>
+                        )}
+
+                        {/* Online Stream Links if present */}
+                        {item.online_streams && item.online_streams.length > 0 && (
+                          <a
+                            href={item.online_streams[0].url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-800/60 text-emerald-200 text-xs py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                          >
+                            <Film className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>پخش آنلاین ویدیو</span>
+                          </a>
+                        )}
 
                         <div className="flex items-center justify-between text-[11px] pt-1">
                           <a
-                            href={item.url}
+                            href={item.post_url || item.url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-slate-400 hover:text-amber-300 flex items-center gap-1 transition-colors"
@@ -474,13 +530,34 @@ export const MovieExplorer: React.FC = () => {
                             <span>مشاهده در cenamaflix.ir</span>
                           </a>
 
-                          <button
-                            onClick={() => setJsonModalData(item)}
-                            className="text-slate-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
-                          >
-                            <Code2 className="w-3 h-3" />
-                            <span>پاسخ API</span>
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {item.sources?.[0]?.url && (
+                              <button
+                                onClick={() => copyToClipboard(item.sources![0].url)}
+                                className="text-slate-400 hover:text-emerald-400 flex items-center gap-1 transition-colors"
+                              >
+                                {copiedUrl === item.sources[0].url ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span className="text-emerald-400">کپی شد</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>کپی لینک</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => setJsonModalData(item)}
+                              className="text-slate-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
+                            >
+                              <Code2 className="w-3 h-3" />
+                              <span>JSON</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>

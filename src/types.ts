@@ -11,6 +11,8 @@ export interface MovieItem {
   cover?: string;
   genres?: string[];
   country?: string[];
+  source_name?: 'Darknama' | 'Cenamaflix' | string;
+  post_url?: string;
   sources?: {
     id?: number;
     quality: string;
@@ -22,15 +24,16 @@ export interface MovieItem {
     language: string;
     url: string;
   }[];
+  online_streams?: {
+    type: string;
+    url: string;
+  }[];
 }
 
-export interface CenamaflixItem {
-  title: string;
+export interface CenamaflixItem extends MovieItem {
   url: string;
-  image?: string;
-  imdb?: string;
-  snippet?: string;
   source: string;
+  snippet?: string;
 }
 
 export interface RJSong {
@@ -85,6 +88,9 @@ export interface RJPlaylist {
   followers?: number;
   items_count?: number;
   share_link?: string;
+  updated_at?: string;
+  category?: string;
+  is_featured?: boolean;
   tracks?: RJSong[];
 }
 

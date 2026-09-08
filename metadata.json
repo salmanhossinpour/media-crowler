@@ -1,0 +1,6 @@
+{
+  "name": "MediaCrawler API",
+  "description": "موتور هوشمند کرولر و وب‌سرویس RESTful فیلم، سریال، زیرنویس و موزیک رادیو جوان به همراه پنل تست زنده و تولید کد",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,13 +1,9 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { handleApiRequest } from './server/apiHandler';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // Raw body parser for POST /api/crawler/scrape
 app.use(express.json());
@@ -19,7 +15,7 @@ app.all('/api*', (req, res) => {
 });
 
 // Serve frontend static build
-const distPath = path.resolve(__dirname, 'dist');
+const distPath = path.join(process.cwd(), 'dist');
 app.use(express.static(distPath));
 
 app.get('*', (req, res) => {

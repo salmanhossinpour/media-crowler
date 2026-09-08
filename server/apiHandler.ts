@@ -11,7 +11,7 @@ import {
   searchCenamaflix,
   getCenamaflixPostDetail,
   universalCrawler
-} from './crawler';
+} from './crawler.ts';
 
 export const API_DOCS = [
   {

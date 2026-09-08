@@ -1,6 +1,6 @@
 import express from 'express';
 import path from 'path';
-import { handleApiRequest } from './server/apiHandler';
+import { handleApiRequest } from './server/apiHandler.ts';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
